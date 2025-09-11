@@ -25,7 +25,7 @@ DEM_PATH = "data/tif/dem.tif"
 COST_SURFACE_PATH = "output/cost_surface.tif"
 
 OUTPUT_DIR = "output"
-LAMBDA = 0.8 # weight between transit cost and movement cost
+LAMBDA = 0.5 # weight between transit cost and movement cost
 
 DEM_NAME = "dem"
 COST_NAME = "cost_surface" 

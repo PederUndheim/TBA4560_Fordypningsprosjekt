@@ -22,14 +22,14 @@ REF_RASTER = INPUT_RASTERS["slope"]
 # --- Weights for SUM-based terrain-cost-surface ---
 WEIGHTS_TERRAIN = {
     "slope": 0.5,
-    "curvature": 0.2,
-    "travel_angle": 0.3
+    "curvature": 0.1,
+    "travel_angle": 0.4
 }
 
 # --- Transform parameters (generalized Cauchy) ---
 TRANSFORM_PARAMS = {   'curvature': {'a': 3, 'b': 10, 'c': 3},
     'slope': {'a': 11, 'b': 4, 'c': 43},
-    'travel_angle': {'a': 11, 'b': 1.2, 'c': 16}}
+    'travel_angle': {'a': 4.5, 'b': 1, 'c': 43}}
 
 # --- Slider ranges for UI ---
 PARAM_RANGES = {
@@ -43,7 +43,7 @@ MAX_COST = 99
 
 # --- Constants ---
 BARRIER_VALUE = 99.0
-ROADS_MIN_VALUE = 5.0
+ROADS_MIN_VALUE = 2.0
 # ROADS_ELSEWHERE_VALUE = 99.0
 
 OUTPUT_COST = "output/cost_surface.tif"

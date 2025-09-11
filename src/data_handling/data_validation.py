@@ -6,7 +6,8 @@ import os
 
 def validate_data_matching(rasterfiles: list[str]) -> None:
     """
-    Validates a list of raster files to check if they all have the same CRS, dimensions, and georeferencing.
+    Validates a list of raster files to check if they all have the same CRS, dimensions,
+    georeferencing, and most importantly, pixel size.
 
     Args:
         rasterfiles (list[str]): A list of file paths to the raster files to validate.
@@ -23,9 +24,14 @@ def validate_data_matching(rasterfiles: list[str]) -> None:
             first_transform = first.transform
             first_bounds = first.bounds
             
+            # Extract and print the pixel size of the first raster
+            first_pixel_x = first_transform.a
+            first_pixel_y = first_transform.e
+            
             print(f"First file loaded: {os.path.basename(first_file_path)}")
             print(f"  - CRS: {first_crs.to_string()}")
             print(f"  - Dimensions: {first_width}x{first_height}")
+            print(f"  - Pixel Size: {first_pixel_x} x {first_pixel_y}")
             print(f"  - Bounding Box: {first_bounds}\n")
             
     except rasterio.errors.RasterioIOError as e:
@@ -56,11 +62,21 @@ def validate_data_matching(rasterfiles: list[str]) -> None:
                     print("  - PASS: Dimensions match.")
                 
                 # Compare Georeferencing (transform)
-                # Check if the affine transforms are nearly equal for floating point precision
-                if not np.allclose(src.transform.to_gdal(), first_transform.to_gdal()):
-                    print(f"  - FAIL: Transform mismatch (pixel size or origin).")
+                # Check pixel size and origin separately for more granular output
+                src_pixel_x = src.transform.a
+                src_pixel_y = src.transform.e
+
+                pixel_size_match = np.allclose([src_pixel_x, src_pixel_y], [first_pixel_x, first_pixel_y])
+                if not pixel_size_match:
+                    print(f"  - FAIL: Pixel size mismatch. File pixel size: {src_pixel_x} x {src_pixel_y}")
                 else:
-                    print("  - PASS: Transform matches.")
+                    print("  - PASS: Pixel size matches.")
+
+                # The full transform check is still the most comprehensive way to check alignment
+                if not np.allclose(src.transform.to_gdal(), first_transform.to_gdal()):
+                    print("  - FAIL: Full transform mismatch (origin, rotation, or shear).")
+                else:
+                    print("  - PASS: Full transform matches.")
                 
                 # Compare Bounding Box (spatial extent)
                 if src.bounds != first_bounds:
