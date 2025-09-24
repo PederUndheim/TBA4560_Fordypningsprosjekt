@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+from typing import Tuple, Dict
 
 # --- GRASS paths ---
 GISBASE = "/Applications/GRASS-8.4.app/Contents/Resources"
@@ -16,30 +17,17 @@ sys.path.append(os.path.join(GISBASE, 'etc', 'python'))
 import grass.script as gs
 import grass.script.setup as gsetup
 
-# --- Initialize GRASS session ---
-gsetup.init(GRASS_DB, GRASS_LOCATION, GRASS_MAPSET)
-print(f"GRASS initialized: location={GRASS_LOCATION}, mapset={GRASS_MAPSET}")
+# Initialize a GRASS session once per run
+def init_grass():
+    gsetup.init(GRASS_DB, GRASS_LOCATION, GRASS_MAPSET)
+    print(f"GRASS initialized: location={GRASS_LOCATION}, mapset={GRASS_MAPSET}")
 
-# Input files
-DEM_PATH = "data/tif/dem.tif"
-COST_SURFACE_PATH = "output/cost_surface.tif"
 
-OUTPUT_DIR = "output"
-LAMBDA = 0.5 # weight between transit cost and movement cost
-
-DEM_NAME = "dem"
-COST_NAME = "cost_surface" 
-POINTS_START = "points_start"
-POINTS_END = "points_end"
-CUM_COST_START = "cumulative_cost_start"
-CUM_COST_END = "cumulative_cost_end"
-CORRIDOR_RASTER = "corridor"
-OPTIMAL_PATH = "optimal_path"
-SMOOTH_PATH = "optimal_path_smooth"
-
-def import_points(points_list, output_name):
-    coords_str = "\n".join(f"{x},{y}" for x, y in points_list)
-    cmd = ["v.in.ascii", "input=-", f"output={output_name}", "separator=,", "--overwrite"]
+# Import a single (x,y) point as a GRASS vector
+def _import_points(name: str, coords: Tuple[float, float]):
+    x, y = coords
+    coords_str = f"{x},{y}\n"
+    cmd = ["v.in.ascii", "input=-", f"output={name}", "separator=,", "--overwrite"]
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -49,104 +37,151 @@ def import_points(points_list, output_name):
     )
     stdout_data, stderr_data = proc.communicate(input=coords_str)
     if proc.returncode != 0:
-        raise Exception(f"Failed to import points '{output_name}': {stderr_data}")
-    print(stdout_data)
-    print(f"Successfully imported points for '{output_name}'.\n")
+        raise RuntimeError(f"Failed to import points '{name}': {stderr_data}")
+    if stdout_data:
+        print(stdout_data.strip())
+    print(f"Imported point {name} at ({x}, {y}).")
 
 
-def import_rasters(start_coords, end_coords):
-    print("Importing rasters and points into GRASS...")
-    gs.run_command("r.in.gdal", input=DEM_PATH, output=DEM_NAME, overwrite=True)
-    gs.run_command("r.in.gdal", input=COST_SURFACE_PATH, output=COST_NAME, overwrite=True)
-
-    start_coords_str = f"x,y\n{start_coords[0]},{start_coords[1]}"
-    end_coords_str = f"x,y\n{end_coords[0]},{end_coords[1]}"
-    import_points([start_coords], POINTS_START)
-    import_points([end_coords], POINTS_END)
-
-# Run r.walk from points to compute cumulative cost
-def compute_cumulative_cost(output_name, points_vector):
-    print(f"Computing cumulative cost for {output_name} using {points_vector}...")
-    gs.run_command("r.walk",
-                   elevation=DEM_NAME,
-                   friction=COST_NAME,
-                   start_points=points_vector,
-                   output=output_name,
-                   lambda_=LAMBDA,
-                   overwrite=True)
-    print(f"Cumulative cost computed and saved as {output_name}.\n")
-    return output_name
-
-# Sum two cumulative cost rasters to create a corridor raster
-def compute_corridor(cum_start, cum_end):
-    print("Computing corridor raster...")
-    gs.mapcalc(f"{CORRIDOR_RASTER} = {cum_start} + {cum_end}", overwrite=True)
-    print(f"Corridor raster {CORRIDOR_RASTER} created.\n")
-    return CORRIDOR_RASTER
-
-# Extract optimal path with r.path and smooth it with v.generalize (Douglas-Peucker algorithm)
-def extract_path(cumulative_raster):
-    print("Generating direction raster from start points...")
-    DIRECTION_RASTER = "direction_start"
-    gs.run_command("r.walk",
-               elevation=DEM_NAME,
-               friction=COST_NAME,
-               start_points=POINTS_START,
-               output=CUM_COST_START,
-               outdir=DIRECTION_RASTER,
-               lambda_=LAMBDA,
-               overwrite=True)
-    
-    print("Extracting optimal path...")
-    end_coord_str = "136483,6962328"  # coordinates of the target
-    gs.run_command("r.drain",
-                input=CUM_COST_START,
-                direction=DIRECTION_RASTER,
-                output="drain_raster",  
-                drain=OPTIMAL_PATH,  
-                start_coordinates=end_coord_str,
-                overwrite=True)
-
-    
-    print("Smoothing the optimal path...")
-    gs.run_command("v.generalize",
-                input=OPTIMAL_PATH,
-                output=SMOOTH_PATH,
-                method="douglas",
-                threshold=10,
-                overwrite=True)
-    print(f"Optimal path saved as {SMOOTH_PATH}.\n")
-    return SMOOTH_PATH
-
-# Export corridor raster and path to output folder
-def export_outputs():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    print("Exporting corridor raster and path shapefile...")
-    gs.run_command("r.out.gdal",
-                   input=CORRIDOR_RASTER,
-                   output=os.path.join(OUTPUT_DIR, "corridor.tif"),
-                   format="GTiff",
-                   overwrite=True)
-    gs.run_command("v.out.ogr", 
-                   input=SMOOTH_PATH,
-                   output=os.path.join(OUTPUT_DIR, "optimal_path.shp"),
-                   format="ESRI_Shapefile",
-                   overwrite=True)
-    print("Export complete.\n")
+# Create a GRASS-safe layer name
+def _safe_name(base: str) -> str:
+    out = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in base)
+    if out and out[0].isdigit():
+        out = "_" + out
+    return out
 
 
-def main():
-    start_coords = (132504, 6959731)
-    end_coords = (136483, 6962328)
 
-    import_rasters(start_coords, end_coords)
-    cum_start = compute_cumulative_cost(CUM_COST_START, POINTS_START)
-    cum_end = compute_cumulative_cost(CUM_COST_END, POINTS_END)
-    corridor_raster = compute_corridor(cum_start, cum_end)
-    extract_path(corridor_raster)
-    export_outputs()
-    print("Routing workflow complete. Outputs saved in 'output/' folder.")
+def run_routing_for_tour(
+    tour_name: str,
+    start_coords: Tuple[float, float],
+    end_coords: Tuple[float, float],
+    *,
+    dem_path: str,
+    cost_surface_path: str,
+    lambda_weight: float,
+    smooth_threshold: float,
+    output_dir: str = "output"
+) -> Dict[str, str]:
+    """
+    Run the full GRASS routing for a single tour and export outputs.
+    Returns a dict with output file paths.
+    """
+    slug = _safe_name(tour_name.lower())
+    dem_name = f"dem_{slug}"
+    cost_name = f"cost_{slug}"
+    start_vec = f"start_{slug}"
+    end_vec = f"end_{slug}"
 
+    cum_start = f"cum_start_{slug}"
+    cum_end = f"cum_end_{slug}"
+    direction_rast = f"dir_start_{slug}"
+    corridor_rast = f"corridor_{slug}"
+    drain_rast = f"drain_{slug}"
+    optimal_path = f"path_{slug}"
+    smooth_path = f"path_smooth_{slug}"
 
-if __name__ == "__main__":
-    main()
+    # Ensure output dirs
+    os.makedirs(output_dir, exist_ok=True)
+    corridor_dir = os.path.join(output_dir, "corridor")
+    geojson_native_dir = os.path.join(output_dir, "path_geojson", "native")
+    geojson_wgs84_dir = os.path.join(output_dir, "path_geojson", "wgs84")
+    shp_dir = os.path.join(output_dir, "path_shp")
+
+    for d in (corridor_dir, geojson_native_dir, geojson_wgs84_dir, shp_dir):
+        os.makedirs(d, exist_ok=True)
+
+    corridor_tif = os.path.join(corridor_dir, f"{slug}_corridor.tif")
+    path_geojson = os.path.join(geojson_native_dir, f"{slug}_path.geojson")
+    path_shp = os.path.join(shp_dir, f"{slug}_path.shp")
+
+    # 1) Import rasters (DEM + cost) and points
+    print(f"[{tour_name}] Importing rasters...")
+    gs.run_command("r.in.gdal", input=dem_path, output=dem_name, overwrite=True)
+    gs.run_command("r.in.gdal", input=cost_surface_path, output=cost_name, overwrite=True)
+
+    print(f"[{tour_name}] Importing start/end points...")
+    _import_points(start_vec, start_coords)
+    _import_points(end_vec, end_coords)
+
+    # 2) Cumulative costs (both directions) and direction raster from start
+    print(f"[{tour_name}] Running r.walk (start -> all)...")
+    gs.run_command(
+        "r.walk",
+        elevation=dem_name,
+        friction=cost_name,
+        start_points=start_vec,
+        output=cum_start,
+        outdir=direction_rast,
+        lambda_=lambda_weight,
+        overwrite=True
+    )
+
+    print(f"[{tour_name}] Running r.walk (end -> all)...")
+    gs.run_command(
+        "r.walk",
+        elevation=dem_name,
+        friction=cost_name,
+        start_points=end_vec,
+        output=cum_end,
+        lambda_=lambda_weight,
+        overwrite=True
+    )
+
+    # 3) Corridor
+    print(f"[{tour_name}] Computing corridor...")
+    gs.mapcalc(f"{corridor_rast} = {cum_start} + {cum_end}", overwrite=True)
+
+    # 4) Extract optimal path using r.drain, then smooth
+    print(f"[{tour_name}] Extracting optimal path with r.drain...")
+    end_x, end_y = end_coords
+    end_coord_str = f"{end_x},{end_y}"
+    gs.run_command(
+        "r.drain",
+        input=cum_start,
+        direction=direction_rast,
+        output=drain_rast,
+        drain=optimal_path,          # vector output
+        start_coordinates=end_coord_str,
+        overwrite=True
+    )
+
+    print(f"[{tour_name}] Smoothing path with v.generalize (Douglas-Peucker)...")
+    gs.run_command(
+        "v.generalize",
+        input=optimal_path,
+        output=smooth_path,
+        method="douglas",
+        threshold=smooth_threshold,
+        overwrite=True
+    )
+
+    # 5) Export: corridor GeoTIFF + path as Shapefile (native CRS) + GeoJSON (native CRS)
+    print(f"[{tour_name}] Exporting corridor and vector path...")
+    gs.run_command(
+        "r.out.gdal",
+        input=corridor_rast,
+        output=corridor_tif,
+        format="GTiff",
+        overwrite=True
+    )
+    gs.run_command(
+        "v.out.ogr",
+        input=smooth_path,
+        output=path_shp,
+        format="ESRI_Shapefile",
+        overwrite=True
+    )
+    gs.run_command(
+        "v.out.ogr",
+        input=smooth_path,
+        output=path_geojson,
+        format="GeoJSON",
+        overwrite=True
+    )
+
+    return {
+        "corridor_tif": corridor_tif,
+        "path_shapefile": path_shp,
+        "path_geojson_native": path_geojson  # Create a WGS84-GeoJSON in main.py
+    }
