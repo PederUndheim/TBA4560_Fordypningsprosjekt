@@ -93,13 +93,11 @@ def create_cost_surface(output_path: str, debug_mode: bool = True):
     roads_mask = _read_mask(config.MASK_RASTERS["roads"]) if config.MASK_RASTERS.get("roads") else None
     tractorroads_trails_mask = _read_mask(config.MASK_RASTERS.get("tractorroads_trails")) if config.MASK_RASTERS.get("tractorroads_trails") else None
     bridges_mask = _read_mask(config.MASK_RASTERS.get("bridges")) if config.MASK_RASTERS.get("bridges") else None
-    fake_bridge_mask = _read_mask(config.MASK_RASTERS.get("fake_bridge")) if config.MASK_RASTERS.get("fake_bridge") else None
 
     rivers_barrier = barrier_layer_from_mask(rivers_mask, barrier_value=config.BARRIER_VALUE) if rivers_mask is not None else None
     roads_reduction = reduction_layer_from_mask(roads_mask, reduction_validity_mask, low_value=config.ROADS_MIN_VALUE, elsewhere_value=config.BARRIER_VALUE) if roads_mask is not None else None
     tractorroads_trails_reduction = reduction_layer_from_mask(tractorroads_trails_mask, reduction_validity_mask, low_value=config.ROADS_MIN_VALUE, elsewhere_value=config.BARRIER_VALUE) if tractorroads_trails_mask is not None else None
     bridges_reduction = reduction_layer_from_mask(bridges_mask, low_value=config.ROADS_MIN_VALUE, elsewhere_value=config.BARRIER_VALUE) if bridges_mask is not None else None                   # bridges always valid
-    fake_bridge_reduction = reduction_layer_from_mask(fake_bridge_mask, low_value=config.ROADS_MIN_VALUE, elsewhere_value=config.BARRIER_VALUE) if fake_bridge_mask is not None else None       # fake bridges always valid
 
     # Pipeline: MAX for barriers, MIN for reductions
     with_barriers = surface_sum
@@ -109,7 +107,7 @@ def create_cost_surface(output_path: str, debug_mode: bool = True):
     if debug_mode:
         _debug_layer_save(with_barriers, "05_with_barriers.tif", ref_profile)
 
-    reduction_layers = [arr for arr in [roads_reduction, tractorroads_trails_reduction, bridges_reduction, fake_bridge_reduction] if arr is not None]
+    reduction_layers = [arr for arr in [roads_reduction, tractorroads_trails_reduction, bridges_reduction] if arr is not None]
     with_reductions = with_barriers
     if reduction_layers:
         with_reductions = min_combine(with_barriers, *reduction_layers)
