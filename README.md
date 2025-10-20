@@ -24,18 +24,6 @@ A raster-based **cost surface** is created, where each cell (1–99) represents 
 
 ---
 
-## Installation and usage
-
-```bash
-git clone https://github.com/<your-username>/avalanche-routing.git
-cd avalanche-routing
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m src.main
-```
-
-
 ## Author
 Developed by Peder Undheim
 NTNU – Department of Engineering Science and ICT, Geomatics specialization
